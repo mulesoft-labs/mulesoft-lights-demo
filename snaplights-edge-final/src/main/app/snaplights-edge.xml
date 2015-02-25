@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:json="http://www.mulesoft.org/schema/mule/json"
+	xmlns:hue="http://www.mulesoft.org/schema/mule/hue" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:objectstore="http://www.mulesoft.org/schema/mule/objectstore" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:mqtt="http://www.mulesoft.org/schema/mule/mqtt" version="EE-3.4.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/mqtt http://www.mulesoft.org/schema/mule/mqtt/current/mule-mqtt.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/objectstore http://www.mulesoft.org/schema/mule/objectstore/current/mule-objectstore.xsd
+http://www.mulesoft.org/schema/mule/hue http://www.mulesoft.org/schema/mule/hue/current/mule-hue.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd">
+    <objectstore:config name="ObjectStore" partition="partitionTwo"  doc:name="ObjectStore"/>
+
+    <hue:config name="Philips_Hue" ipAddress="${hue.ipAddress}" username="${hue.username}" doc:name="Philips Hue"/>
+    
+    <mqtt:config name="MQTT" brokerServerUri="${mqtt.broker.url}" password="${mqtt.password}" username="${mqtt.username}" doc:name="MQTT" clientId="#['mule@'+server.ip]"  >
+        <mqtt:connection-pooling-profile initialisationPolicy="INITIALISE_ALL" exhaustedAction="WHEN_EXHAUSTED_WAIT" maxActive="2" maxIdle="2"/>
+    </mqtt:config>
+
+    <mqtt:config name="MQTT2" brokerServerUri="${mqtt.broker.url}" password="${mqtt.password}" username="${mqtt.username}" doc:name="MQTT2" clientId="#['mule2@'+server.ip]"  >
+        <mqtt:connection-pooling-profile initialisationPolicy="INITIALISE_ALL" exhaustedAction="WHEN_EXHAUSTED_WAIT" maxActive="2" maxIdle="2"/>
+    </mqtt:config>
+    <vm:connector name="VM" validateConnections="true" doc:name="VM"/>
+
+    <sub-flow name="get-connected-lights-flow" doc:name="get-connected-lights-flow">
+        <hue:get-lights config-ref="Philips_Hue" doc:name="Get connected lights"/>
+		<!--  uncomment this set-payload when the hue:get-lights is commented out -->
+<!-- 		<set-payload value="#[{&quot;1&quot;: {&quot;name&quot;: &quot;Hue Lamp&quot;}, &quot;2&quot;: {&quot;name&quot;: &quot;Hue Lamp1&quot;},	&quot;3&quot;: {&quot;name&quot;: &quot;Hue Lamp 2&quot;},&quot;4&quot;: { &quot;name&quot;: &quot;Hue Lamp 4&quot;}}]" doc:name="Set Payload"/> -->
+        <json:json-to-object-transformer returnClass="java.util.Map" doc:name="JSON to Map"/>
+    </sub-flow>
+    
+    <flow name="set-snaplights-colors-from-text-flow" doc:name="set-snaplights-colors-from-text-flow">
+        <mqtt:subscribe topicFilter="home.livingroom.lights" config-ref="MQTT" doc:name="From home.livingroom.lights"/>
+        <logger message="Received: #[payload]" level="INFO" doc:name="Logger"/>
+        <enricher source="#[payload.size()]" target="#[variable:lightscounter]" doc:name="Message Enricher">
+            <flow-ref name="get-connected-lights-flow" doc:name="get-connected-lights-flow"/>
+        </enricher>
+        <json:json-to-object-transformer returnClass="java.util.Map" doc:name="JSON to Object"/>
+        <expression-component doc:name="Index Colours"><![CDATA[colors = payload.info.colors;
+lc = flowVars['lightscounter'];
+map = new HashMap();
+
+if(lc > colors.size()) {
+	x = colors.size();
+	for ( int i = x; i < lc; i++) {
+	    colors.add(colors[i-x]);
+	}
+}
+i = 0;
+foreach (c : colors) {
+  if (i < lc)  {
+    if (c==null) c = 'fff';
+    if (c=='000000') c = 'fff';
+    map.put(i, '#' + c);
+    //log.info(map.get(i));
+    i++;
+  }
+}
+payload = map]]></expression-component>
+        <foreach doc:name="For Each">
+            <hue:set-light-state config-ref="Philips_Hue" lightId="#[flowVars['counter']]" doc:name="Philips Hue">
+                <hue:state color="#[payload]"/>
+            </hue:set-light-state>
+ 			<logger message="#['\nLight color changed: '+'\nlight id: ' + flowVars['counter'] + '\ncolor: ' + payload]" level="INFO" doc:name="Log lightid, color"/>
+        </foreach>
+    </flow>
+
+    <sub-flow name="set-real-brightness" doc:name="set-real-brightness" >
+				<set-variable variableName="brightnessReal" value="#[payload*200]" doc:name="Set new brightness value"/>
+				<enricher source="#[payload.size()]" target="#[variable:lightscounter]" doc:name="Message Enricher">
+					<flow-ref name="get-connected-lights-flow" doc:name="get-connected-lights-flow"/>
+				</enricher>
+				<logger level="INFO" message="#['Brightness is now: ' + flowVars['brightnessReal']]" doc:name="Log actual brightness"/>
+                <expression-component doc:name="Expression"><![CDATA[lc = flowVars['lightscounter'];
+ll = new ArrayList();
+
+for (j=0; j < lc; j++) {
+  ll.add(j);
+}
+//System.out.println(ll);
+payload = ll;]]></expression-component>
+    </sub-flow>
+
+    <flow name="set-snaplights-colors-from-twitter-flow" doc:name="set-snaplights-colors-from-twitter-flow">
+		<mqtt:subscribe topicFilter="home.social.lights" config-ref="MQTT2" doc:name="From home.social.lights"/>
+        <vm:outbound-endpoint exchange-pattern="one-way" path="snaplightsBrightnessQueue" connector-ref="VM" doc:name="To snaplightsBrightnessQueue"/>
+    </flow>
+    
+    
+    <flow name="set-snaplights-brightness-logic-flow" doc:name="set-snaplights-brightness-logic-flow">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="snaplightsBrightnessQueue" connector-ref="VM" doc:name="From snaplightsBrightnessQueue"/>
+        <json:json-to-object-transformer returnClass="java.util.Map" doc:name="JSON to Object"/>
+        <set-variable variableName="brightnessDelta" value="#[payload['brightness']]" doc:name="Store brightnessDelta as variable"/>
+        <choice doc:name="if positive, send to burndownCounter ">
+            <when expression="#[flowVars['brightnessDelta'] &gt; 0]">
+                <async doc:name="Async">
+                    <vm:outbound-endpoint exchange-pattern="one-way" path="burndownCounterQueue" connector-ref="VM" doc:name="To burndownCounterQueue"/>
+                </async>
+            </when>
+            <otherwise>
+                <logger message="#['Log: Negative count found. brightnessDelta= '+flowVars['brightnessDelta']]" level="INFO" doc:name="Log negative count found"/>
+            </otherwise>
+        </choice>
+        <objectstore:contains config-ref="ObjectStore" key="brightness" doc:name="Check if brightness is set"/>
+        <choice doc:name="if payload not set, set to 0">
+            <when expression="#[payload == 'false']">
+                <logger message="LOG: Brightness not defined. Setting brightness to 0" level="INFO" doc:name="Log brightness not defined. setting=0"/>
+                <objectstore:store config-ref="ObjectStore" key="brightness" value-ref="#[0]" overwrite="true" doc:name="Store brightness as 0"/>
+            </when>
+            <otherwise>
+                <logger message="#['brightness value already set= '+payload.toString()]" level="INFO" doc:name="Log brightness already set"/>
+            </otherwise>
+        </choice>
+        <objectstore:retrieve config-ref="ObjectStore" key="brightness" targetProperty="brightness" doc:name="Retrieve brightness value"/>
+       	<objectstore:store config-ref="ObjectStore" key="brightness" value-ref="#[Integer.parseInt(flowVars['brightness']) + Integer.parseInt(flowVars['brightnessDelta'])]" doc:name="Increment or Decrement brightness value and Store" overwrite="true"/>
+        <objectstore:retrieve config-ref="ObjectStore" key="brightness" targetProperty="brightness" doc:name="Retrieve brightness value"/>
+        <choice doc:name="if brightness &lt; 0, set brightness/payload to 0">
+            <when expression="#[Integer.parseInt(flowVars['brightness']) &lt; 0]">
+                <objectstore:store config-ref="ObjectStore" key="brightness" value-ref="#[0]" overwrite="true" doc:name="Store brightness as 0"/>
+                <objectstore:retrieve config-ref="ObjectStore" key="brightness" targetProperty="brightness" doc:name="Retrieve brightness value"/>
+            </when>
+            <otherwise>
+                <logger message="#['Log: Brightness &gt;= 0']" level="INFO" doc:name="Log Brightness &gt;= 0"/>
+            </otherwise>
+        </choice>
+        <set-payload value="#[Integer.parseInt(flowVars['brightness'])]" doc:name="Convert brightness to payload integer"/>
+        <choice doc:name="if brightness above max, color loop on">
+        	<when expression="#[payload*200 &gt; 255]">
+        		<flow-ref name="set-real-brightness" doc:name="set-real-brightness"/>
+        		<foreach doc:name="For Each">
+            		<hue:set-light-state config-ref="Philips_Hue" lightId="#[flowVars['counter']]" doc:name="Colorloop on!">
+                		<hue:state brightness="#[255]" effect="colorloop" color="#['#' + '${hue.color}']"/>
+            		</hue:set-light-state>
+					<logger message="#['\nLight now set to colorloop.'+'\nlight id: '+flowVars['counter']]" level="INFO" doc:name="Log lightid, brightness, hue"/>
+        		</foreach>
+        	</when>
+        	<otherwise>
+                <flow-ref name="set-real-brightness" doc:name="set-real-brightness"/>
+                <foreach doc:name="For Each">
+            		<hue:set-light-state config-ref="Philips_Hue" lightId="#[flowVars['counter']]" doc:name="Adjust brightness">
+                		<hue:state brightness="#[Integer.parseInt(flowVars['brightnessReal'])]" color="#['#' + '${hue.color}']" effect="none"/>
+            		</hue:set-light-state>
+					<logger message="#['\nLight brightness changed: '+'\nlight id: ' + flowVars['counter'] + '; Real brightness: ' + Integer.parseInt(flowVars['brightnessReal']) + '; hue color: ' + '${hue.color}']" level="INFO" doc:name="Log lightid, brightness, hue"/>
+        		</foreach>
+        	</otherwise>
+        </choice>
+    </flow>
+    
+    <flow name="burndown-countdown-flow" doc:name="burndown-countdown-flow">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="burndownCounterQueue" connector-ref="VM" doc:name="From burndownCounterQueue"/>
+        <logger message="#['LOG: starting burndown counter with count= '+payload['brightness']]" level="INFO" doc:name="Log starting burndown counter"/>
+        <expression-component doc:name="Sleep for burndown time"><![CDATA[burntime = 60000;
+bri = payload['brightness'];
+burn = bri * burntime;
+Thread.sleep(burn);
+payload = -1 * bri;]]></expression-component>
+        <set-payload value="#['{&quot;brightness&quot;:' + payload + ' }' ]" doc:name="Set Payload"/>
+        <vm:outbound-endpoint exchange-pattern="one-way" path="snaplightsBrightnessQueue" connector-ref="VM" doc:name="To snaplightsBrightnessQueue"/>
+    </flow>
+ 
+</mule>

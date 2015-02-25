@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="lib" path="lib/jersey-client-1.12.jar" rootpath="/"/>
+	<classpathentry kind="lib" path="lib/jersey-core-1.12.jar" rootpath="/"/>
+	<classpathentry kind="lib" path="lib/mqtt-client-0.4.0.jar" rootpath="/"/>
+	<classpathentry kind="lib" path="lib/mule-module-hue-1.0-SNAPSHOT.jar" rootpath="/"/>
+	<classpathentry kind="lib" path="lib/mule-module-mqtt-1.1-SNAPSHOT.jar" rootpath="/"/>
+	<classpathentry kind="lib" path="lib/mule-module-objectstore-1.3.0.jar" rootpath="/"/>
+	<classpathentry kind="lib" path="lib/validation-api-1.0.0.GA.jar" rootpath="/"/>
+	<classpathentry exported="true" kind="con" path="MULE_RUNTIME"/>
+	<classpathentry kind="src" path="src/main/app"/>
+	<classpathentry kind="src" path="src/main/java"/>
+	<classpathentry kind="src" path="src/main/resources"/>
+	<classpathentry kind="src" output="target/test-classes" path="src/test/java"/>
+	<classpathentry kind="src" output="target/test-classes" path="src/test/resources"/>
+	<classpathentry kind="src" path="src/main/api"/>
+	<classpathentry kind="con" path="MULE_LIB/MQTT/org.mule.tooling.ui.contribution.mqtt"/>
+	<classpathentry kind="con" path="MULE_LIB/ObjectStore/org.mule.tooling.ui.contribution.objectstore"/>
+	<classpathentry kind="src" path="mappings"/>
+	<classpathentry kind="output" path="target/classes"/>
+</classpath>
